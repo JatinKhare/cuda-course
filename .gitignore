@@ -1,0 +1,23 @@
+# Build artifacts
+*.exe
+*.exp
+*.lib
+*.pdb
+*.obj
+*.o
+*.cubin
+*.ptx
+*.sass
+*.fatbin
+
+# nvcc intermediates
+*.cudafe1.*
+*.module_id
+tmpxft_*
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
