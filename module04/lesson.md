@@ -59,8 +59,25 @@ Each SM on sm_89 has **65 536 32-bit registers**. That is a fixed physical array
 The consequence is arithmetic:
 
 ```
-resident_warps_per_SM  <=  65536 / (regs_per_thread * 32)
+resident_warps_per_SM  <=  65536 / (regs_per_thread * 32)      // approximate
 ```
+
+> **⚠️ Correction (measured in Module 19 against 137 kernels).** That formula is
+> the *aggregate* model and it is **wrong on ~7% of kernels**, because the
+> register file is not one pool. Each SM has **four slices of 16384 registers**,
+> and a warp's registers must come from a single slice — M1 described the four
+> processing blocks; this is the consequence. The correct form is
+>
+> ```
+> resident_warps_per_SM  <=  4 * floor(16384 / (roundUp(regs,8) * 32))
+> ```
+>
+> Worked counterexample: 47 registers at 64 threads. Aggregate says
+> `65536/1536 = 42` warps; slices say `4*floor(16384/1536) = 40`, and 40 is what
+> the hardware places. The stranded 1024 registers per slice **cannot be
+> pooled**. Registers are also allocated in granules of **8 per thread**.
+> Module 19 derives the full four-limiter formula; use the approximation above
+> only for a quick estimate.
 
 At 32 registers per thread you can hold 64 warps — above the 48-warp hardware limit, so registers are not binding. At 64 registers per thread you get 32 warps, and you have lost a third of your latency-hiding capacity. At 128 registers you get 16 warps. The per-thread ceiling is **255 registers**; ask for more and the compiler spills. Occupancy as a formal subject is **Module 19**; for now, note only that register count is one of the three things that decides it.
 

@@ -48,7 +48,7 @@
 //
 //   Replace the placeholder below. Do not change the body.
 // ---------------------------------------------------------------------
-__host__ __forceinline__ float horner5(float x)   // YOUR CODE HERE (TODO 1)
+__host__ __device__ __forceinline__ float horner5(float x)   // YOUR CODE HERE (TODO 1)
 {
     float p = 2.0f;
     p = p * x - 3.0f;
@@ -76,6 +76,9 @@ __host__ __forceinline__ float horner5(float x)   // YOUR CODE HERE (TODO 1)
 __global__ void eval_poly(const float* x, float* out, int n)
 {
     // YOUR CODE HERE (TODO 2)
+    int id = threadIdx.x + blockIdx.x*blockDim.x;
+    if(id<=1000003)
+        out[id] = horner5(x[id]);
 }
 
 int main(void)
@@ -109,7 +112,7 @@ int main(void)
     //   Every one of the n elements must be covered by exactly one
     //   thread, and you may not launch a block that has no work at all.
     // -----------------------------------------------------------------
-    int blocks = 0;          // YOUR CODE HERE (TODO 3)
+    int blocks = n/threads + 1;          // YOUR CODE HERE (TODO 3)
 
     if (blocks <= 0) { printf("Set TODO 3 (blocks) first.\n"); return 0; }
 

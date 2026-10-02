@@ -56,7 +56,7 @@
 //   Set the value. Then, separately, predict whether the eight D lines
 //   will appear in increasing global-thread-id order, and why.
 // =====================================================================
-static int predicted_phaseA_order = 0;   // YOUR CODE HERE (TODO 1): 1..4
+static int predicted_phaseA_order = 1;   // YOUR CODE HERE (TODO 1): 1..4
 
 // =====================================================================
 // TODO 2: Phase B times the launch STATEMENT itself on the host clock
@@ -69,7 +69,7 @@ static int predicted_phaseA_order = 0;   // YOUR CODE HERE (TODO 1): 1..4
 //     3 : roughly 100-1000 us
 //     4 : about the same as the kernel's own duration
 // =====================================================================
-static int predicted_launch_cost_bucket = 0;  // YOUR CODE HERE (TODO 2): 1..4
+static int predicted_launch_cost_bucket = 2;  // YOUR CODE HERE (TODO 2): 1..4
 
 // =====================================================================
 // TODO 3: Phase C launches the compute kernel and then immediately calls

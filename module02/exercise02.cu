@@ -87,6 +87,7 @@ static void launch_saxpy_clamp(const float* d_in, float* d_out, size_t size,
     // TODO 1: this check is not sufficient. Add what is missing so that
     //         the program blames the line that is actually at fault.
     CHECK(cudaGetLastError());
+    CHECK(cudaDeviceSynchronize());
     // YOUR CODE HERE (TODO 1)
 }
 
@@ -114,7 +115,7 @@ int main(void)
 
     // TODO 2: fix the root cause. Nothing goes here; the fix is a change
     //         to an existing line somewhere in this file.
-    launch_saxpy_clamp(d_in, d_out, bytes, a, b, lo, hi);
+    launch_saxpy_clamp(d_in, d_out, n, a, b, lo, hi);
 
     CHECK(cudaMemcpy(h_out, d_out, bytes, cudaMemcpyDeviceToHost));
 
@@ -133,6 +134,6 @@ int main(void)
     CHECK(cudaFree(d_in));
     CHECK(cudaFree(d_out));
     free(h_in); free(h_out); free(h_ref);
-    CHECK(cudaDeviceReset());
+    //CHECK(cudaDeviceReset());
     return (bad == 0 && g_errors == 0) ? 0 : 1;
 }

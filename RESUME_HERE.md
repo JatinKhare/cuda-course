@@ -1,71 +1,114 @@
-# Resume state — Parts I–V complete, 2026-09-28
+# Resume state — paused 2026-10-02
+
+## To resume: one message
+
+> "Continue the CUDA course. Finish Modules 22, 23, 24, then carry on."
+
+Everything needed is on disk. No conversation context is required — the
+authoring state lives in `AUTHORING_SPEC.md`, `CROSS_MODULE_INDEX.md` and this
+file.
 
 ## Status
 
 | Modules | State |
 |---|---|
-| **1–18 (Parts I, II, III, IV, V)** | **COMPLETE and verified.** Every solution compiled and executed on the GPU; every number in the notes is measured. |
-| 19–44 + 5 final projects | Not started. |
+| **1–21** | **COMPLETE and verified.** Every solution compiled and executed on the GPU; every number measured. |
+| **22, 23, 24** | ⚠️ **PARTIAL — do not study these yet.** See below. |
+| 25–44 + 5 projects | Not started. |
 
-18 lessons · 35 worked examples · 53 exercises · 53 verified solutions ·
-18 answer keys · 18 manifests · 252 files · 0 binaries.
+21 lessons · 41 worked examples · 59 exercises · 59 verified solutions.
 
-## Next batch — Part VI, Performance Engineering (Modules 19–23)
+## ⚠️ Modules 22–24 are partial and UNVERIFIED
 
-Suggested wave: **19, 20, 21** then **22, 23** (three at a time; see process
-note below).
+Two agent generations were interrupted (first by an auth expiry, then by a
+deliberate pause). Partial files survive and are a sound starting point, but
+**nothing in these three modules has been verified** and the `.cu` files may not
+even compile.
 
-Modules 19–21 inherit an unusually strong evidence base — these are normally
-the hand-wavy modules of a CUDA course, and here they are all measured:
+| | lesson | exercises | examples | solution .cu | solution .md | manifest |
+|---|---|---|---|---|---|---|
+| m22 Nsight Systems | — | 2/3 | 2 | 2/3 | 0/3 | — |
+| m23 Nsight Compute | — | 0/3 | 2 | 2/3 | 0/3 | — |
+| m24 Streams | — | 2/3 | 2 | 2/3 | 0/3 | — |
 
-- **M19 Occupancy** is owed the headline result from M18: **100% occupancy is
-  18.7× slower than 33%** on the same GEMM source via `__launch_bounds__`, and
-  occupancy is **non-monotone** (25→33% wins, 33→67% loses 9×). Also owed:
-  **registers are the fourth placement-gate limiter** — M6's occupancy formula
-  omits them, and M17 measured two kernels identical in threads and shared
-  memory differing 3 vs 2 blocks/SM on 44 vs 40 registers. Also: the register
-  granule is **8 per thread, allocated per warp**, and the spill cliff is *not*
-  the first spilled byte (an 80 B spill that buys a block is 1.12× faster).
-- **M20 Latency hiding** is owed M1's measured curve (dependent pointer chase:
-  linear to 3 warps, knee at 6, flat at 4.87× by 24) and M11's ILP/MLP
-  measurements (hoisted vs `#pragma unroll 1` = 2.1× at 1 block/SM, 1.00× at 8).
-- **M21 Roofline** has all three axes measured: DRAM 410.5–410.7 GB/s, FP32
-  17,787–18,256 GFLOP/s, machine balance 43–44 FLOP/byte, **and** the shared
-  memory axis M17 added (5.4 TB/s scalar `LDS`, 10.3 TB/s `LDS.128`). M17 notes
-  the roofline needs that third axis to explain tiled GEMM at all.
-- **M22–23 Nsight** must be **theory only**: `ncu` fails with
-  `ERR_NVGPUCTRPERM` (needs elevation the user declined to chase) and
-  `compute-sanitizer --tool synccheck` detects nothing on CUDA 13.2. Give the
-  command lines and metric names; design no exercise whose validation depends
-  on them.
+Each still needs: `lesson.md`, the missing exercises and solutions, all
+`_solution.md` files, `check_your_understanding.md`, `MANIFEST.md`, and a full
+verification pass. The last agents left these notes mid-edit:
+- m22: "rewrite Exercise 2 around the measured reality"
+- m23: "fix Exercise 2's stale text and warning"
+- m24: "rewrite exercise02 with a working instrument and no out-of-bounds replay"
 
-## Process notes that mattered
+**Review the surviving files critically — some were written before the `nsys`
+discovery below and may assume the wrong thing.**
 
-- **Three agents per wave, not five.** Five concurrent took 8–16 h per module;
-  three took 1.5–2 h for the same work. Contention, not workload.
-- **Verify by executing, not just compiling.** Module 15 compiled clean and
-  had a reference solution that failed its own gate 1 run in 3.
-- **Do not validate modules in back-to-back batches** — it induces the
-  power-capped state (memory pinned at 6001 MHz) and produces false failures.
-  Cool down between programs.
+## ✅ Important: `nsys` WORKS (discovered 2026-10-02)
+
+Earlier assumptions that "all Nsight tooling is broken" were **wrong**. `ncu`
+needs GPU performance counters (blocked, `ERR_NVGPUCTRPERM`). **Nsight Systems
+does tracing and needs no such permission — it was merely not on PATH.**
+
+```
+NSYS="/c/Program Files/NVIDIA Corporation/Nsight Systems 2025.6.3/target-windows-x64/nsys.exe"
+"$NSYS" profile -o out --force-overwrite=true --stats=true ./prog.exe
+```
+
+Verified producing real `cuda_api_sum`, `cuda_gpu_kern_sum`,
+`cuda_gpu_mem_time_sum`, `cuda_gpu_mem_size_sum` tables. Two versions installed;
+use **2025.6.3**. So **Module 22 should be built on real captured profiles**,
+and Modules 24+ can use `nsys` as an instrument.
+
+`ncu` remains theory-only — Module 23's angle is to teach each metric by
+anchoring it to a measurement the course already made independently (sectors
+from M5, bank conflicts from M7/M18, the four-limiter slice occupancy model from
+M19, the stall taxonomy from M20, the five-ceiling roofline from M21).
+
+## Remaining roadmap
+
+- **Part VII finish** — 25 events, 26 pinned memory, 27 unified memory,
+  28 CUDA graphs, 29 cooperative groups
+- **Part VIII** — 30 warp primitives in depth (**recharted**: not their
+  introduction; they are load-bearing from M10 onward), 31 warp specialization
+- **Part IX** — 32 async copy, `cuda::pipeline`, mbarrier
+- **Part X** — 33 Tensor Core fundamentals, 34 WMMA/MMA, 35 modern tensor
+  pipelines (sm_90+, conceptual with an sm_89 fallback)
+- **Parts XI–XVII** — 36 libraries, 37 compilation pipeline, 38 PTX, 39 SASS,
+  40 multi-GPU, 41 CUDA for AI, 42 LLM inference kernels, 43 CUTLASS,
+  44 modern CUDA 2026
+- **5 final projects**
+
+## Process notes
+
+- **Three agents per wave.** Five concurrent took 8–16 h/module; three take
+  1.5–2 h for the same work.
+- **Verify by executing, not just compiling** — M15 compiled clean with a
+  reference solution that failed its own gate 1 run in 3.
+- **Verify one program at a time with cool-downs** (spec §12.5c). Back-to-back
+  batches induce the power-capped state and produce false failures.
 - Per-wave loop: launch 3 → collect manifests → fold corrections into
   `AUTHORING_SPEC.md` and `CROSS_MODULE_INDEX.md` → launch next 3.
 - Shared files are edited by the orchestrator only; agents propose changes in
   their manifests.
+- **Interrupted agents leave usable partial work.** Resuming with an explicit
+  "here is what survived / here is what is missing" prompt works well — proven
+  twice.
 
-## Corrections made to already-shipped material (keep doing this)
+## Corrections already pushed back into shipped modules
 
-Later modules have repeatedly falsified earlier ones. That is the process
-working, not a defect — but the earlier file must be fixed:
+Later modules keep falsifying earlier ones. The earlier file gets fixed:
+- **M4's register formula** → corrected to the four-slice model (M19, verified
+  on 137 kernels; the aggregate model is wrong on ~7%).
+- **M7's `max(2,D)` law** → width qualifier added (4-byte only; `LDS.128` is ∝D).
+- **M16's "FMAs per global load"** → restated as *per operand-fetch instruction*.
+- **Spec §5's float tolerance** → rejects a correct GEMM; superseded for
+  dot-product kernels by `module16/example01.cu`'s validator.
+- **Spec §12's "ratios stable to ~1%"** → false, corrected.
+- **Min-of-N** → re-introduces positional bias on sweeps that heat the part;
+  use the median.
 
-- **M7's `max(2,D)` cost law** now carries a width qualifier in
-  `module07/lesson.md`: it holds for **4-byte accesses only**; on `LDS.128`
-  cost ∝ D with no floor. M18 isolated this with byte-identical SASS.
-- **M16's "6.4–6.5 FMAs per global load"** is restated in the index as **per
-  operand-fetch instruction** — M17 and M18 hit this independently.
-- **Spec §12's "ratios are stable to ~1% across thermal states"** was false and
-  is corrected.
-- **Spec §5's default float tolerance** rejects a correct GEMM; the GEMM
-  validator in `module16/example01.cu` supersedes it for dot-product kernels.
-- **Padding folklore** now has four contradictory measurements (M7 +19%,
-  M15 tie, M17 −40%, M18 +23%) and a unifying rule in the index §6b.
+## Unresolved disagreement (do not teach as fact)
+
+**Block-shape fungibility.** M20 measured 20 warps/SM as one 640-thread block at
+1.008 instr/cycle/sched vs five 128-thread blocks at 0.625. M19's controlled
+experiment found all shapes within 1.4–3.4% with no ordering. M20's own fit does
+not predict its own contrast. Recorded in `CROSS_MODULE_INDEX.md` §6b as
+unresolved; both modules adopt the conservative methodology regardless.

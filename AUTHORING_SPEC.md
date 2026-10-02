@@ -339,9 +339,25 @@ these rules:
 1. **Time all configurations back-to-back in one loop.** Do not validate,
    allocate, or print between timed configurations — those let the clock ramp
    down and silently reorder your results.
+   **Scope note (Module 21): this applies to *competing* configurations — ones
+   you are comparing against each other.** Ceilings on *different axes* need
+   different warm-ups and must be grouped separately. M21 measured one combined
+   sweep giving **326 GB/s + 13,750 GFLOP/s**, versus two groups (1500 ms
+   stream → off-chip ceilings, then 500 ms compute → on-chip ceilings) giving
+   **410 GB/s + 18,642 GFLOP/s**. Group by axis, warm each group for its own
+   resource, rotate within a group.
 2. **Validate in a separate second pass**, after all timing is done.
 3. **Take min-of-N** across at least 3–4 full sweeps, not a single sweep and not
    a mean. The minimum is the least clock-contaminated sample.
+   **⚠️ Failure mode on long sweeps (Module 19): rotation removes positional
+   bias from the *mean*, not from the *minimum*.** Once a sweep is long enough
+   to heat the part monotonically (M19's was 1.7 s of full-machine FFMA, which
+   §12.12's ~10 ms segments force), each configuration's minimum is just its
+   earliest-position sample, and min-of-N **re-introduces exactly the bias
+   rotation exists to remove**. M19 measured the two lowest-indexed shapes
+   reporting 10% faster under min-of-N and **equal under the median** of the
+   same samples, reproducibly. **If the sweep heats the part, report the
+   median and say so.**
 4. **Warm-up must be at least 1500 ms — not 400 ms.** This is the single most
    important correction in this section. A 400 ms duration-based warm-up ramps
    the **SM clock** but *not* the **memory P-state**. Module 12 measured the
@@ -381,6 +397,15 @@ these rules:
      ~118 GB/s power-capped — use ~200 as the cut), **idle ~10 s and re-warm**,
      up to ~5 attempts;
    - then warn and proceed — never silently skip scoring.
+   **Qualifier (Module 19): the probe must stress the same fraction of the
+   machine as the kernel it is guarding.** A 480-block FFMA probe reported a
+   healthy 17,143 GFLOP/s on a run where a full-machine kernel was taking 2.5×
+   its usual *cycles* — and that run then scored 8/10 on a correct solution.
+   Guard with a balanced reference launch, not a small one.
+   **Also: a harness that scores only *ratios computed inside one rotated
+   sweep* needs no guard at all** — M19's Exercise 2 scored 10/10 from a
+   2.4×-throttled operating point. Only gates that compare *across* launches
+   are exposed.
 5c. **Do not validate modules in back-to-back batches.** Running many timed
    programs consecutively induces exactly the state above. It produced a false
    `FAIL` on a Module 15 solution that passes standalone. Put a cool-down
@@ -441,6 +466,31 @@ these rules:
     loop-invariant address out of the loop. It only became honest once the
     addresses depended on the loop index. If a number exceeds a physical bound,
     the benchmark is broken, not the hardware.
+    **⚠️ Clock clause (Module 21): build the bound from
+    `nvidia-smi --query-gpu=clocks.max.sm` (3105 MHz), NOT from the 2.04 GHz
+    figure quoted elsewhere in this spec.** That 2.04 is an *observation*, not a
+    bound, and a bound built on it **falsely rejects correct measurements** —
+    M21 observed it rejecting a valid 329.6 G instr/s result.
+14. **An honest-looking probe can still measure the wrong thing with nothing
+    eliminated.** Separate from rules 11–12: M21's under-unrolled FFMA probe
+    reported a reproducible, entirely fictitious **13,750 GFLOP/s vs 18,642**,
+    not because the compiler removed anything, but because a 12-instruction
+    loop body containing 8 FFMAs spends **33% of its issue slots on loop
+    overhead**. When measuring a *throughput* ceiling, unroll until loop
+    overhead is negligible and verify the instruction mix in SASS.
+15. **When sweeping a parameter, hold the work per loop branch constant — not
+    the trip count.** If the loop body's work varies with the sweep parameter,
+    `ptxas` changes its unroll factor and produces a **~25% artefact that looks
+    exactly like a hardware effect**. Module 20 traced this precisely (64 vs 192
+    FFMAs between branches at C=2) and believes it is the mechanism behind
+    Module 11's unexplained C=2 MLP anomaly.
+16. **Occupancy sweeps: resident warps are not fungible across block shapes.**
+    The same warps/SM packaged differently differs by 1.6× (M20: one 640-thread
+    block = 1.008 instr/cycle/scheduler; five 128-thread blocks = 0.625). Sweep
+    blocks/SM over **{1, 2, 3, 4, 8, 12} only**, or hold blocks/SM fixed and
+    vary block size. Prefer block sizes that are a multiple of 128 threads — a
+    block whose warp count isn't a multiple of 4 loads the four schedulers
+    unequally.
     32 adjacent unrolled shared-memory reads became 8 `LDS.128` instructions,
     converting a 32-way scalar conflict into 8-way-per-phase and collapsing the
     measured penalty from ~16× to 3.15×. When microbenchmarking a *specific*
@@ -458,6 +508,24 @@ these rules:
 If a measurement contradicts the lesson's prediction, **investigate and explain
 it in the solution md**. Do not adjust the claim to fit, and do not quietly drop
 the case. A documented surprise is worth more than a clean table.
+
+### ✅ Nsight Systems (`nsys`) WORKS — it is just not on PATH
+
+Verified 2026-10-02 by capturing a real profile with full `--stats=true` output
+(kernel times, memcpy breakdown, CUDA API summary). Earlier assumptions that
+"all Nsight tooling is broken" were WRONG — `nsys` does *tracing*, which does
+not need the GPU performance counters that `ncu` is blocked on.
+
+```
+NSYS="/c/Program Files/NVIDIA Corporation/Nsight Systems 2025.6.3/target-windows-x64/nsys.exe"
+"$NSYS" profile -o out --force-overwrite=true --stats=true ./prog.exe
+"$NSYS" stats out.nsys-rep
+```
+
+Two versions are installed (2025.1.3 and 2025.6.3); use **2025.6.3**. Modules
+that trace CPU/GPU timelines, launch overhead, transfer overlap or stream
+concurrency should capture **real** profiles and paste **real** output.
+Delete `.nsys-rep` and `.sqlite` artifacts when done.
 
 ### Broken tooling: document it, never try to fix it
 
