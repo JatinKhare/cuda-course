@@ -127,7 +127,7 @@ __global__ void kineticEnergy(const float4 *__restrict__ vel, float *out, int n)
 //
 // Nsight Systems can: `cuda_gpu_kern_sum` timestamps the kernel on the device
 // itself. Profiling this program reports all 800 computeForces instances at
-// 152651.8 ns +/- 1002 ns -- version A's kernels and version B's kernels are
+// 152570.7 ns +/- 1008 ns -- version A's kernels and version B's kernels are
 // the SAME SPEED, and the entire difference this harness reports as "GPU time"
 // is launch gap. The lesson works that discrepancy through in full.
 // -----------------------------------------------------------------------------
@@ -376,7 +376,7 @@ int main(void)
     // summed GPU time should be equal. This harness says it is not: it charges
     // version A reproducibly 10-20% more "GPU time" than version B.
     //
-    // Nsight Systems says the kernels are identical (152651.8 ns +/- 1002 ns
+    // Nsight Systems says the kernels are identical (152570.7 ns +/- 1008 ns
     // over all 800 instances of computeForces, spanning both versions). The
     // excess is launch gap that the event pairs cannot separate from kernel
     // execution, and version A -- which empties the queue every step with a
@@ -387,7 +387,7 @@ int main(void)
     // profiler can tell you WHERE it went.
     double rel = 100.0 * (gpuA - gpuB) / fmax(gpuA, gpuB);
     double busyA = 100.0 * gpuA / wallA, busyB = 100.0 * gpuB / wallB;
-    printf("\nA's apparent GPU time excess: %+.1f%%  (expect +10..20%%; it is launch\n"
+    printf("\nA's apparent GPU time excess: %+.1f%%  (expect +5..25%%; it is launch\n"
            "                              gap misattributed to kernel time, not\n"
            "                              a real difference in kernel speed)\n", rel);
 

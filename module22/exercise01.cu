@@ -404,38 +404,52 @@ int main(void)
     // and the wall time gives an upper bound on everything, so a fabricated
     // number has to survive two inequalities and a ratio.
     double kerMs = NS_KERNEL_NS / 1e6, lauMs = NS_LAUNCH_NS / 1e6, synMs = NS_SYNCCOST_NS / 1e6;
-    double gpuBound = gpuN + gpuF;          // event bound, over BOTH versions
     double wallBoth = wallN + wallF;
     int    launches = 2 * STEPS * 3;        // 1800
     bool given = (NS_KERNEL_NS > 0.0) && (NS_LAUNCH_NS > 0.0) && (NS_SYNCCOST_NS > 0.0);
-    // Real device execution time must be positive, must be below the event
-    // bound (which absorbs launch gaps on top of it), and cannot be a rounding
-    // error either. Three inequalities a guessed number has to satisfy at once.
-    // 0.15, not 0.30: the event bound is an upper bound whose TIGHTNESS
-    // varies run to run (a cold first run inflated it 2x), so a tighter
-    // window would reject a correct profile. A fabricated number still has
-    // to land inside a 6.7x window AND below the bound.
-    bool kerOk = given && kerMs > 0.15 * gpuBound && kerMs < gpuBound;
+
+    // These gates deliberately compare the three nsys numbers against EACH
+    // OTHER and against the launch count -- never against this run's wall
+    // clock. Reason, measured while authoring this module: the same binary and
+    // the same capture command reported `residual` at 35.1 us in one session
+    // and 253.4 us in another -- a 7.2x swing -- because the laptop had been
+    // benchmarking for an hour and the power manager had collapsed the clocks
+    // (spec S12.5 / S12.5c). Absolute milliseconds are not portable across
+    // sessions on this part. Ratios inside one capture are.
     double usPerLaunch = 1000.0 * lauMs / (double)launches;
-    bool lauOk = given && usPerLaunch > 2.0 && usPerLaunch < 100.0 && lauMs < wallBoth;
-    bool synOk = given && synMs > 0.0 && synMs < wallBoth;
+    double usPerKernel = 1000.0 * kerMs / (double)launches;
+
+    // 1800 launches of three kernels whose durations differ by ~3x. Any real
+    // capture lands in [4, 600] us of device time per launch; a guess that
+    // lands there has already had to know the right order of magnitude.
+    bool kerOk = given && usPerKernel > 4.0 && usPerKernel < 600.0
+                       && kerMs < lauMs + synMs;     // GPU execution is the minority
+    bool lauOk = given && usPerLaunch > 2.0 && usPerLaunch < 150.0;
+    // The finding, as an inequality: the host spends more time WAITING inside
+    // cudaMemcpy than it spends ASKING for work, and more than the device
+    // spends executing. Both hold in every capture of this program.
+    bool synOk = given && synMs > lauMs && synMs > kerMs;
     if (!given) printf("[ ] 4-6. TODO 5 not filled in -- profile the program.\n");
     else {
-        printf("[%s] 4. nsys kernel time plausible (%.3f ms; event bound %.3f ms)\n",
-               kerOk ? "x" : " ", kerMs, gpuBound);
+        printf("[%s] 4. nsys kernel time plausible (%.3f ms = %.1f us x %d launches)\n",
+               kerOk ? "x" : " ", kerMs, usPerKernel, launches);
         printf("[%s] 5. nsys launch cost plausible (%.3f ms = %.1f us x %d launches)\n",
                lauOk ? "x" : " ", lauMs, usPerLaunch, launches);
-        printf("[%s] 6. nsys memcpy cost plausible (%.3f ms of %.3f ms wall)\n",
-               synOk ? "x" : " ", synMs, wallBoth);
+        printf("[%s] 6. nsys memcpy cost dominates (%.3f ms > launch %.3f > kernel %.3f)\n",
+               synOk ? "x" : " ", synMs, lauMs, kerMs);
         score += kerOk + lauOk + synOk;
     }
 
     if (given && kerOk) {
-        printf("\nOver the whole capture (both versions, %.1f ms wall):\n", wallBoth);
-        printf("  GPU actually executing       = %.1f%%   (event bound claimed %.1f%%)\n",
-               100.0 * kerMs / wallBoth, 100.0 * gpuBound / wallBoth);
-        printf("  host inside cudaLaunchKernel = %.1f%%\n", 100.0 * lauMs / wallBoth);
-        printf("  host inside cudaMemcpy       = %.1f%%\n", 100.0 * synMs / wallBoth);
+        double tot = kerMs + lauMs + synMs;
+        printf("\nShare of the three accounted-for costs inside the capture:\n");
+        printf("  GPU actually executing       = %.1f%%  (%.1f ms)\n", 100.0 * kerMs / tot, kerMs);
+        printf("  host inside cudaLaunchKernel = %.1f%%  (%.1f ms)\n", 100.0 * lauMs / tot, lauMs);
+        printf("  host inside cudaMemcpy       = %.1f%%  (%.1f ms)\n", 100.0 * synMs / tot, synMs);
+        printf("This run's event bound said the GPU was busy <= %.1f%% of %.1f ms of\n",
+               100.0 * (gpuN + gpuF) / wallBoth, wallBoth);
+        printf("wall time. nsys says WHERE the rest went; the event pairs could only\n");
+        printf("say THAT it went.\n");
     }
 
     CHECK(cudaFree(a)); CHECK(cudaFree(b)); CHECK(cudaFree(dRes));

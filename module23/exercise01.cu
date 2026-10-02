@@ -1,9 +1,34 @@
 // =============================================================================
-// Module 23 / Exercise 1 — SOLUTION — read the report, then check it against
-//                                     the machine.
+// Module 23 / Exercise 1 — interpret an ncu report, then check it against the
+//                          machine.
 //
-// BUILD: nvcc -arch=sm_89 -O3 -lineinfo -o e1s.exe exercise01_solution.cu
-// RUN  : e1s.exe
+// GOAL : Below is a CONSTRUCTED Nsight Compute report for four kernels you have
+//        already written in this course. `ncu` cannot run on this machine
+//        (ERR_NVGPUCTRPERM), so the report was assembled from this course's own
+//        measurements — it is physically consistent with this GPU and you should
+//        read it exactly as you would a real one.
+//
+//        Diagnose each of the four kernels FROM THE METRICS ALONE. Then the
+//        program runs all four kernels and all four stated fixes, times each
+//        pair back to back with rotation, validates every one numerically, and
+//        scores your diagnosis against what the machine actually does.
+//
+//        Interpretation on paper. Verification real.
+//
+// WHAT TO FILL IN
+//   TODO 1  DIAG[4]    — the diagnosis code for each kernel      (menu of 6)
+//   TODO 2  METRIC[4]  — the single decisive metric row for each (menu of 8)
+//   TODO 3  BUCKET[4]  — which speedup bucket the stated fix lands in
+//   TODO 4  k4_mlp()   — write the fix for kernel 4 yourself      (DESIGN)
+//   TODO 5  REDHERRING — the one claim in the report that is NOT valid evidence
+//
+// Run the program once with TODOs 1,2,3,5 still zero: it prints the report and
+// the menus and exits. Read it, decide, then fill in and run again.
+//
+// SCORING: 13 points. OVERALL: PASS requires 13/13 AND all four validations.
+//
+// BUILD: nvcc -arch=sm_89 -O3 -lineinfo -o exercise01.exe exercise01.cu
+// RUN  : exercise01.exe
 // =============================================================================
 
 #include <cstdio>
@@ -40,17 +65,25 @@
 #define K4_N      ((size_t)K4_BLOCKS*K4_THR*K4_MLP*K4_CHUNK)   // 65,536,000 floats = 262.14 MB
 
 // =============================================================================
-// ====================  ANSWERS  ==============================================
+// ====================  YOUR ANSWERS  =========================================
 // =============================================================================
-// TODO 1 — diagnosis per kernel.
-static const int DIAG[4]   = { 4, 1, 6, 3 };
-// TODO 2 — the single decisive metric row per kernel.
-static const int METRIC[4] = { 3, 1, 7, 6 };
-// TODO 3 — predicted speedup bucket from the stated fix.
-//          1: below 1.5x   2: 1.5x to 6x   3: above 6x
-static const int BUCKET[4] = { 3, 1, 2, 2 };
-// TODO 5 — the claim in the report that is NOT valid evidence.
-static const int REDHERRING = 2;
+// TODO 1: the diagnosis code (1..6, from the DIAGNOSIS CODES menu the program
+//         prints) for each of the four profiled kernels, in order.
+//         Leave as zeros to have the program print the report and stop.
+static const int DIAG[4]   = { 0, 0, 0, 0 };   // YOUR CODE HERE
+
+// TODO 2: the ONE metric row in each kernel's section that is decisive — the
+//         row you would point at to justify the diagnosis above.  (1..8)
+static const int METRIC[4] = { 0, 0, 0, 0 };   // YOUR CODE HERE
+
+// TODO 3: which bucket the speedup of the stated fix will land in.
+//         1: below 1.5x    2: 1.5x to 6x    3: above 6x
+//         Commit before you run. The harness measures it.
+static const int BUCKET[4] = { 0, 0, 0, 0 };   // YOUR CODE HERE
+
+// TODO 5: exactly one of the five CLAIMS the program prints is not valid
+//         evidence, even though the number it quotes is real. Which one? (1..5)
+static const int REDHERRING = 0;               // YOUR CODE HERE
 
 // =============================================================================
 // The four kernel pairs. A = the profiled kernel, B = the stated fix.
@@ -178,18 +211,24 @@ __global__ void k4_serial(const float * __restrict__ in, float *partial, size_t 
 }
 __global__ void k4_mlp(const float * __restrict__ in, float *partial, size_t n)
 {
+    // TODO 4: kernel 4 reads one float per loop iteration and immediately adds
+    //         it, so a warp has exactly one load outstanding at a time. The grid
+    //         shape is fixed by the application and may NOT be changed.
+    //
+    //         Rewrite the loop so each thread has K4_MLP independent loads in
+    //         flight before it consumes any of them. Two constraints:
+    //           * the per-thread partial sums must come out BIT-IDENTICAL to
+    //             k4_serial's, so the validation pass can compare them exactly;
+    //           * the compiler must not be able to collapse your loads back
+    //             into a dependent chain.
+    //
+    //         Think about which stride the K4_MLP loads of one thread should
+    //         use, and what that does to the warp's sector footprint.
+    //
+    // YOUR CODE HERE
     size_t gid = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
-    size_t nt  = gridDim.x * (size_t)blockDim.x;
-    float a = 0.0f;
-    #pragma unroll 1
-    for (size_t base = gid; base + (K4_MLP-1)*nt < n; base += K4_MLP*nt) {
-        float v[K4_MLP];
-        #pragma unroll
-        for (int k = 0; k < K4_MLP; ++k) v[k] = in[base + (size_t)k*nt];
-        #pragma unroll
-        for (int k = 0; k < K4_MLP; ++k) a += v[k];
-    }
-    partial[gid] = a;
+    partial[gid] = 0.0f;
+    (void)in; (void)n;
 }
 
 // ---- deterministic device-side initialisation ------------------------------
@@ -462,6 +501,11 @@ int main(void)
     printReport();
     printMenus();
 
+    if (DIAG[0] == 0 || METRIC[0] == 0 || BUCKET[0] == 0 || REDHERRING == 0) {
+        printf("\nSet TODO 1, 2, 3 and 5 first (and write TODO 4).\n");
+        return 0;
+    }
+
     // ---- allocate -----------------------------------------------------------
     CHECK(cudaMalloc(&d_tab,  K1_USE*K1_REC*sizeof(float)));       // 512 MB
     CHECK(cudaMalloc(&d_col,  K1_USE*sizeof(float)));              //  64 MB
@@ -586,7 +630,7 @@ int main(void)
         CHECK(cudaMemcpy(pb, d_part, np*sizeof(float), cudaMemcpyDeviceToHost));
         int bad = 0;
         for (size_t i = 0; i < np; ++i) if (pa[i] != pb[i]) ++bad;
-        printf("   k4 serial vs 4-in-flight differing     : %d\n", bad);
+        printf("   k4 serial vs 8-in-flight differing     : %d\n", bad);
         if (bad) vok = 0;
         free(pa); free(pb);
     }

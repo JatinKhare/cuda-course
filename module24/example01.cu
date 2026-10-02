@@ -419,10 +419,16 @@ int main(void)
         for (int i = 0; i < NSTREAMS; ++i) CHECK(cudaStreamDestroy(nb[i]));
     }
     printf("\nCure 2: compile with --default-stream per-thread.  Rebuild this file\n");
-    printf("   with that flag and compare row 3 of the table above.\n");
-    printf("Cure 3: pass an explicit stream to EVERY asynchronous call.  Note that\n");
-    printf("   cure 2 does NOT rescue row 4: cudaMalloc is a device-wide implicit\n");
-    printf("   synchronization no matter which default stream you selected.\n\n");
+    printf("   with that flag and compare rows 3, 4 and 5 of the table above.\n");
+    printf("   Rows 3 and 5 recover completely: both were slow only because the\n");
+    printf("   operation landed on the LEGACY default stream, and per-thread\n");
+    printf("   semantics take that stream's device-wide barrier away.\n");
+    printf("   Row 4 does NOT recover.  cudaMalloc and cudaFree are implicit\n");
+    printf("   synchronization in their own right -- they drain the device no\n");
+    printf("   matter which default stream you selected.  That is the line to\n");
+    printf("   remember: per-thread cures DEFAULT-STREAM syncs, not API syncs.\n");
+    printf("Cure 3: pass an explicit stream to EVERY asynchronous call, and keep\n");
+    printf("   allocation out of the steady-state loop entirely.\n\n");
 
     /* ============================================================== */
     printf("=== E. cudaStreamQuery and cudaLaunchHostFunc ================\n");

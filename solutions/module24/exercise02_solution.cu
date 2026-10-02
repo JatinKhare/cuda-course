@@ -37,7 +37,7 @@
  * WHAT IS SCORED (10 points; OVERALL: PASS requires all of them)
  *   3  DIAG_A/B/C name the three real causes (any order)
  *   2  overlapFactor() agrees with the reference on a synthetic timeline
- *   3  the repaired pipeline is still correct AND reaches >= 1.30x serial
+ *   3  the repaired pipeline is still correct AND reaches >= 1.35x serial
  *   1  PRED_PT_CURED: how many causes --default-stream per-thread removes
  *   1  PRED_BUCKET: the bucket the repaired speedup lands in
  * ===================================================================== */
@@ -102,11 +102,11 @@ static const int DIAG_C = 5;   /* the D2H destination is pageable         */
  *
  * (b) PRED_BUCKET: once all three are repaired, which bucket does the
  *     speedup (serial / repaired) land in?
- *        1 : below 1.15x    2 : 1.15 .. 1.30x
- *        3 : 1.30 .. 2.00x  4 : above 2.00x
+ *        1 : below 1.20x    2 : 1.20 .. 1.35x
+ *        3 : 1.35 .. 2.00x  4 : above 2.00x
  * =================================================================== */
 static const int PRED_PT_CURED = 1;    /* only the default-stream cause   */
-static const int PRED_BUCKET   = 3;    /* 1.30x .. 2.00x                  */
+static const int PRED_BUCKET   = 3;    /* 1.35x .. 2.00x                  */
 
 static const int N_STREAMS = 4;
 static const int N_CHUNKS  = 16;
@@ -142,8 +142,11 @@ __global__ void computeWarm(float* sink, int iters)
 static int           g_n, g_iters;
 static float        *g_dIn, *g_dOut;
 static int          *g_dClip;         /* one counter per chunk            */
-static float        *g_dBlockFirst;   /* per-block scratch; main allocates
-                                       * it big enough for the FULL grid  */
+static float        *g_dScratch;      /* per-block scratch, laid out as
+                                       * N_CHUNKS slices of g_stride floats;
+                                       * slice k starts at
+                                       * g_dScratch + k*g_stride           */
+static int           g_stride;        /* floats per chunk slice           */
 static cudaStream_t  g_s[8];
 static float        *g_hIn;           /* pinned, allocated by the harness */
 static float        *g_hOut;          /* TODO 3 owns this one             */
@@ -205,8 +208,9 @@ static void freeHostOut(float* p)
  *   - every chunk is still transformed into g_hOut;
  *   - g_dClip[k] is still set to zero before chunk k's kernel runs, and
  *     the kernel still counts into it;
- *   - the kernel still writes one float per block into a scratch buffer
- *     that is at least as long as the grid it launches;
+ *   - the kernel still writes one float per block into THIS CHUNK'S slice
+ *     of the scratch buffer -- slice k begins at g_dScratch + k*g_stride
+ *     and is g_stride floats long, which is >= any chunk's block count;
  *   - the OP_BEGIN / OP_END pairs still bracket the same operations;
  *   - nothing in this function may synchronize before the final wait.
  * =================================================================== */
@@ -229,9 +233,9 @@ static void pipeline(int nChunks)
 
         /* FIX 2: no allocation inside the loop.  cudaMalloc and cudaFree are
          * device-wide implicit synchronization points; they drain every
-         * stream before they return.  main() already allocates g_dBlockFirst
-         * for the FULL grid, which is >= any chunk's grid, so the per-chunk
-         * resize was never necessary in the first place. */
+         * stream before they return.  main() already allocates g_dScratch as
+         * N_CHUNKS slices of g_stride floats, and g_stride is >= any chunk's
+         * block count, so the per-chunk resize was never necessary. */
 
         OP_BEGIN(st, "H2D");
         CHECK(cudaMemcpyAsync(g_dIn + off, g_hIn + off, (size_t)len * sizeof(float),
@@ -240,7 +244,8 @@ static void pipeline(int nChunks)
 
         OP_BEGIN(st, "ker");
         condition<<<blocks, BLOCK, 0, st>>>(g_dIn + off, g_dOut + off, len, g_iters,
-                                            g_dClip + k, g_dBlockFirst);
+                                            g_dClip + k,
+                                            g_dScratch + (size_t)k * g_stride);
         CHECK(cudaGetLastError());
         OP_END(st);
 
@@ -321,14 +326,11 @@ static uint64_t fnv1a(uint64_t h, long long v)
 static void serialRun(void)
 {
     int blocks = (g_n + BLOCK - 1) / BLOCK;
-    float* tmp = nullptr;
-    CHECK(cudaMalloc(&tmp, (size_t)blocks * sizeof(float)));
     CHECK(cudaMemcpy(g_dIn, g_hIn, (size_t)g_n * 4, cudaMemcpyHostToDevice));
     CHECK(cudaMemset(g_dClip, 0, sizeof(int)));
-    condition<<<blocks, BLOCK>>>(g_dIn, g_dOut, g_n, g_iters, g_dClip, tmp);
+    condition<<<blocks, BLOCK>>>(g_dIn, g_dOut, g_n, g_iters, g_dClip, g_dScratch);
     CHECK(cudaGetLastError());
     CHECK(cudaMemcpy(g_hOut, g_dOut, (size_t)g_n * 4, cudaMemcpyDeviceToHost));
-    CHECK(cudaFree(tmp));
 }
 
 static void warmUp(float* dA, float* dB, size_t nWarm, float* sink)
@@ -364,7 +366,15 @@ int main(void)
     CHECK(cudaMalloc(&g_dIn,  bytes));
     CHECK(cudaMalloc(&g_dOut, bytes));
     CHECK(cudaMalloc(&g_dClip, (size_t)N_CHUNKS * sizeof(int)));
-    CHECK(cudaMalloc(&g_dBlockFirst, (size_t)((N + BLOCK - 1) / BLOCK) * sizeof(float)));
+    {   /* one scratch slice per chunk, long enough for the largest chunk's
+         * grid and also for the whole-buffer grid the serial version uses */
+        int cMax = (N + N_CHUNKS - 1) / N_CHUNKS;
+        g_stride = (cMax + BLOCK - 1) / BLOCK;
+        size_t slots = (size_t)N_CHUNKS * g_stride;
+        size_t full  = (size_t)((N + BLOCK - 1) / BLOCK);
+        if (full > slots) slots = full;
+        CHECK(cudaMalloc(&g_dScratch, slots * sizeof(float)));
+    }
     for (int i = 0; i < N; ++i) g_hIn[i] = 0.5f + (float)(i % 1021) * 1.0e-4f;
 
     const size_t nWarm = (size_t)64 * 1024 * 1024;
@@ -442,13 +452,19 @@ int main(void)
             CHECK(cudaEventElapsedTime(&b, t0, g_eEv[i]));
             stA[i] = a; enA[i] = b;
         }
-        printf("  %-3s %-4s %9s %9s  timeline (1 column ~ 0.4 ms)\n",
-               "op", "kind", "start", "end");
+        /* one column per span/48, so the whole run always fits the width */
+        double span = 0.0;
+        for (int i = 0; i < nOps; ++i) if (enA[i] > span) span = enA[i];
+        double col = (span > 0.0) ? span / 48.0 : 1.0;
+        printf("  %-3s %-4s %9s %9s  timeline (1 column = %.3f ms)\n",
+               "op", "kind", "start", "end", col);
         for (int i = 0; i < nOps && i < 12; ++i) {
             printf("  %-3d %-4s %9.3f %9.3f  ", i, g_tag[i], stA[i], enA[i]);
-            int a = (int)(stA[i] / 0.4), b = (int)(enA[i] / 0.4);
-            for (int c = 0; c < a && c < 64; ++c) putchar('.');
-            for (int c = a; c <= b && c < 64; ++c) putchar('#');
+            int a = (int)(stA[i] / col), b = (int)(enA[i] / col);
+            if (a < 0) a = 0;
+            if (b < a) b = a;
+            for (int c = 0; c < a && c < 48; ++c) putchar('.');
+            for (int c = a; c <= b && c < 48; ++c) putchar('#');
             putchar('\n');
         }
         printf("  ... %d operations in total.  If the bars never share a column,\n", nOps);
@@ -518,27 +534,29 @@ int main(void)
                          cudaMemcpyDeviceToHost));
         bool clipOk = true;
         for (int k = 0; k < N_CHUNKS; ++k) if (hClip[k] != 0) clipOk = false;
-        /* the per-block scratch must still be written for the last chunk */
-        int oL, lL; chunkOf(N_CHUNKS - 1, N, N_CHUNKS, &oL, &lL);
-        int lastBlocks = (lL + BLOCK - 1) / BLOCK;
-        float* hbf = (float*)malloc((size_t)lastBlocks * sizeof(float));
-        CHECK(cudaMemcpy(hbf, g_dBlockFirst, (size_t)lastBlocks * sizeof(float),
-                         cudaMemcpyDeviceToHost));
+        /* every chunk must have written ITS OWN scratch slice.  This check is
+         * order independent: no chunk may land in another chunk's slice. */
+        size_t slots = (size_t)N_CHUNKS * g_stride;
+        float* hbf = (float*)malloc(slots * sizeof(float));
+        CHECK(cudaMemcpy(hbf, g_dScratch, slots * sizeof(float), cudaMemcpyDeviceToHost));
         bool scratchOk = true;
-        for (int b = 0; b < lastBlocks; ++b) {
-            int idx = oL + b * BLOCK;
-            if (idx >= N) break;
-            float v = g_hIn[idx];
-            for (int k = 0; k < g_iters; ++k) v = fmaf(v, 1.000001f, 1.0e-7f);
-            if (fabs((double)v - (double)hbf[b]) > 1e-5 * fmax(1.0, fabs((double)v)))
-                scratchOk = false;
+        for (int kc = 0; kc < N_CHUNKS; ++kc) {
+            int oc, lc; chunkOf(kc, N, N_CHUNKS, &oc, &lc);
+            int nb = (lc + BLOCK - 1) / BLOCK;
+            for (int b = 0; b < nb; ++b) {
+                float v = g_hIn[oc + b * BLOCK];
+                for (int k = 0; k < g_iters; ++k) v = fmaf(v, 1.000001f, 1.0e-7f);
+                double got = hbf[(size_t)kc * g_stride + b];
+                if (fabs((double)v - got) > 1e-5 * fmax(1.0, fabs((double)v)))
+                    scratchOk = false;
+            }
         }
         free(hbf);
-        bool fixOk = (bad == 0) && (untouched == 0) && clipOk && scratchOk && (sp >= 1.30);
+        bool fixOk = (bad == 0) && (untouched == 0) && clipOk && scratchOk && (sp >= 1.35);
         printf("  %d wrong, %d unwritten, clip counters %s, per-block scratch %s\n",
                bad, untouched, clipOk ? "ok" : "BROKEN", scratchOk ? "ok" : "BROKEN");
         printf("  %s\n\n", fixOk ? "ok (+3)"
-                                 : "FAILED -- need correct, behaviour preserved, and >= 1.30x (+0)");
+                                 : "FAILED -- need correct, behaviour preserved, and >= 1.35x (+0)");
         if (fixOk) score += 3;
 
         printf("=== TODO 5: the two predictions ================================\n");
@@ -548,7 +566,7 @@ int main(void)
             printf("  (a) per-thread default stream removes %d of the three : %s\n",
                    peek(&PRED_PT_CURED), a ? "ok (+1)" : "wrong (+0)");
             if (a) score += 1;
-            int actual = (sp < 1.15) ? 1 : (sp < 1.30) ? 2 : (sp < 2.00) ? 3 : 4;
+            int actual = (sp < 1.20) ? 1 : (sp < 1.35) ? 2 : (sp < 2.00) ? 3 : 4;
             bool b = (peek(&PRED_BUCKET) == actual);
             printf("  (b) bucket: you said %d, measurement is in %d : %s\n",
                    peek(&PRED_BUCKET), actual, b ? "ok (+1)" : "wrong (+0)");
@@ -568,7 +586,7 @@ cleanup:
     CHECK(cudaEventDestroy(evA)); CHECK(cudaEventDestroy(evB)); CHECK(cudaEventDestroy(t0));
     CHECK(cudaFree(wA)); CHECK(cudaFree(wB)); CHECK(cudaFree(sink));
     CHECK(cudaFree(g_dIn)); CHECK(cudaFree(g_dOut));
-    CHECK(cudaFree(g_dClip)); CHECK(cudaFree(g_dBlockFirst));
+    CHECK(cudaFree(g_dClip)); CHECK(cudaFree(g_dScratch));
     CHECK(cudaFreeHost(g_hIn));
     freeHostOut(g_hOut);
     CHECK(cudaDeviceReset());

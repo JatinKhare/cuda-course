@@ -104,7 +104,8 @@ Worked examples: `example01.cu` (space tour + register-vs-local demonstration),
   working sets past L2 for every bandwidth measurement
 - **Module 19** (occupancy): register count caps resident warps;
   `65536 / (regs × 32)`; the 142-register instantiation capping at 14 warps
-- **Module 26** (pinned memory, async copies, streams): pinned memory is
+- **Module 26** (pinned memory) and **Module 24** (streams/async copies)
+  [renumbered; this manifest predates the current roadmap]: pinned memory is
   measured here but its real payoff — genuine `cudaMemcpyAsync` and copy/compute
   overlap — is deferred
 - Nsight Compute *Memory Workload Analysis* named as the profiler section that

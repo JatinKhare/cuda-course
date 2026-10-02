@@ -56,9 +56,9 @@
  * will run anything you wrote.  Which bucket will the measured
  * speedup (serial time / your pipeline time) fall into?
  *
- *     1 : below 1.15x      (essentially no overlap)
- *     2 : 1.15x .. 1.35x
- *     3 : 1.35x .. 2.00x
+ *     1 : below 1.10x      (essentially no overlap)
+ *     2 : 1.10x .. 1.30x
+ *     3 : 1.30x .. 2.00x
  *     4 : above 2.00x
  *
  * Derive it from the phase times and asyncEngineCount the harness
@@ -368,6 +368,11 @@ int main(void)
     printf("  serial, three phases back to back: %8.3f ms\n\n", best[3]);
 
     if (peek(&PRED_BUCKET) < 1 || peek(&PRED_BUCKET) > 4) {
+        printf("  NOTE: with the TODOs still blank, two of the six timed\n");
+        printf("  configurations do nothing at all, which lets the clock sag\n");
+        printf("  between the others.  Use the numbers above to decide an ORDER\n");
+        printf("  OF MAGNITUDE; the scored run measures them again with your\n");
+        printf("  pipeline in place.\n\n");
         printf("Set TODO 5a (PRED_BUCKET) first.\n");
         goto cleanup;
     }
@@ -450,7 +455,7 @@ int main(void)
         if (perfOk) score += 2;
 
         /* ---- prediction ------------------------------------------- */
-        int actualBucket = (sp < 1.15) ? 1 : (sp < 1.35) ? 2 : (sp < 2.00) ? 3 : 4;
+        int actualBucket = (sp < 1.10) ? 1 : (sp < 1.30) ? 2 : (sp < 2.00) ? 3 : 4;
         bool predOk = (peek(&PRED_BUCKET) == actualBucket);
         printf("=== prediction ================================================\n");
         printf("  you said bucket %d, the measurement landed in bucket %d\n",

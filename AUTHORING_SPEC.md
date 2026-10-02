@@ -405,8 +405,46 @@ these rules:
    **Also: a harness that scores only *ratios computed inside one rotated
    sweep* needs no guard at all** — M19's Exercise 2 scored 10/10 from a
    2.4×-throttled operating point. Only gates that compare *across* launches
-   are exposed.
-5c. **Do not validate modules in back-to-back batches.** Running many timed
+   are exposed. M24 confirmed this independently: across a 30 W→72.8 W
+   transition its achieved-fraction-of-bound moved only 1–2 points and **every
+   gate and prediction bucket held at both operating points.**
+   **⚠️ A THIRD operating-point state exists, and `clocks.sm` does not reveal
+   it (Module 24).** On battery or under a reduced platform power budget the
+   GPU can be capped at **30 W instead of 60 W**, pinning the SM clock at
+   **210 MHz** and memory at 405 MHz with `SW_POWER_CAP` + `SW_THERMAL_SLOWDOWN`
+   asserted **while at 100% utilization** — this is *not* the "recovers after
+   20–40 s idle" state described above, and it persisted until the battery
+   reached ~26%. H2D measured 1.5 GB/s; kernels ran 10× slow. Detect it with:
+   ```
+   nvidia-smi -q -d POWER | grep "Current Power Limit"
+   ```
+   `nvidia-smi --query-gpu=clocks.sm` does **not** distinguish it.
+   **Conclusions can invert in this state**, not merely degrade: M24's
+   pinned-vs-pageable result reversed (pageable 1.65× vs pinned 1.73×), because
+   a 1.5 GB/s DMA leaves the host's staging copy plenty of slack. If you are
+   measuring absolute throughput or any cross-launch comparison, check the
+   power limit first.
+5e. **Design gates to FAIL only above a hardware bound, and WARN below one.**
+   A gate that fails when a number is *too low* will fire on a throttled
+   machine against correct code — M23 got a false `OVERALL: FAIL` on a correct
+   program this way. A number *above* a physical bound means the arithmetic is
+   wrong, which is always a real defect; a number below one may just mean the
+   GPU is cold or power-capped. Both M19 and M23 confirmed spec §12.5b's
+   exemption empirically: in-sweep ratio scoring passed 13/13 and 9/9 from a
+   badly degraded operating point *and* from a healthy one.
+5c. **Do not validate modules in back-to-back batches.** Measured twice:
+   M23's `example02` run immediately after `example01` reported the DRAM
+   ceiling at **127 GB/s**; the same binary after a **75 s cool-down** reported
+   **410.9 GB/s**. A 3.2× error from nothing but run order.
+   **Worse, measured by M22: a 7.2× uniform swing.** The same binary under the
+   same `nsys` command reported a kernel at **35,067.7 ns cool** and
+   **253,413.6 ns after ~1 h of benchmarking**, with `nvidia-smi` showing the
+   SM clock at 210 MHz — far beyond the 1.5× memory-clock drop documented
+   above, and it **failed a correct solution**.
+   **⇒ Rule: any gate comparing a number from one run against a number from
+   another run must be ratio-based, or carry a ≥3× window.** M22 rebuilt its
+   Exercise 1 gates on orderings (`memcpy > launch > kernel`) plus per-launch
+   µs windows rather than absolute thresholds. Running many timed
    programs consecutively induces exactly the state above. It produced a false
    `FAIL` on a Module 15 solution that passes standalone. Put a cool-down
    between programs, or verify them one at a time.
@@ -540,9 +578,13 @@ why, and teach the concept without it. Known-broken as of this batch:
   bugs on CUDA 13.2 / sm_89. Theory only; use `racecheck` and
   `initcheck --initcheck-address-space shared` instead.
 
-Modules 22–23 (Nsight Systems / Nsight Compute) will be taught as theory plus
-screenshots-in-prose rather than live profiling runs, unless the user says
-otherwise.
+**Superseded — do not follow the old guidance that once stood here.** It said
+Modules 22–23 would both be theory-only. That was wrong for Module 22:
+**`nsys` works and Module 22 was built on real captures.** Only Module 23 is
+constrained, and even there the *host-side* listings work (`ncu --list-sets`,
+`--list-sections`, and `sections/*.section`), so metric names and display
+labels can and must be validated against the installed tool — M23 did exactly
+that. Only counter *collection* is blocked.
 
 ### Nsight Compute is currently unavailable on this machine
 

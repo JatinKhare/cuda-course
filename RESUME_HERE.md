@@ -2,7 +2,7 @@
 
 ## To resume: one message
 
-> "Continue the CUDA course. Finish Modules 22, 23, 24, then carry on."
+> "Continue the CUDA course — next batch is Modules 25, 26, 27."
 
 Everything needed is on disk. No conversation context is required — the
 authoring state lives in `AUTHORING_SPEC.md`, `CROSS_MODULE_INDEX.md` and this
@@ -12,34 +12,14 @@ file.
 
 | Modules | State |
 |---|---|
-| **1–21** | **COMPLETE and verified.** Every solution compiled and executed on the GPU; every number measured. |
-| **22, 23, 24** | ⚠️ **PARTIAL — do not study these yet.** See below. |
+| **1–24** | **COMPLETE and verified.** Every solution compiled and executed on the GPU; every number measured. |
 | 25–44 + 5 projects | Not started. |
 
-21 lessons · 41 worked examples · 59 exercises · 59 verified solutions.
+24 lessons · 47 worked examples · 71 exercises · 71 verified solutions.
 
-## ⚠️ Modules 22–24 are partial and UNVERIFIED
-
-Two agent generations were interrupted (first by an auth expiry, then by a
-deliberate pause). Partial files survive and are a sound starting point, but
-**nothing in these three modules has been verified** and the `.cu` files may not
-even compile.
-
-| | lesson | exercises | examples | solution .cu | solution .md | manifest |
-|---|---|---|---|---|---|---|
-| m22 Nsight Systems | — | 2/3 | 2 | 2/3 | 0/3 | — |
-| m23 Nsight Compute | — | 0/3 | 2 | 2/3 | 0/3 | — |
-| m24 Streams | — | 2/3 | 2 | 2/3 | 0/3 | — |
-
-Each still needs: `lesson.md`, the missing exercises and solutions, all
-`_solution.md` files, `check_your_understanding.md`, `MANIFEST.md`, and a full
-verification pass. The last agents left these notes mid-edit:
-- m22: "rewrite Exercise 2 around the measured reality"
-- m23: "fix Exercise 2's stale text and warning"
-- m24: "rewrite exercise02 with a working instrument and no out-of-bounds replay"
-
-**Review the surviving files critically — some were written before the `nsys`
-discovery below and may assume the wrong thing.**
+Parts I–VII(partial) done: fundamentals, memory system, execution, core
+parallel algorithms, GEMM, performance engineering, and the first of the
+advanced-CUDA modules (streams).
 
 ## ✅ Important: `nsys` WORKS (discovered 2026-10-02)
 

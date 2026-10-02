@@ -1,8 +1,35 @@
 // =============================================================================
-// Module 23 / Exercise 2 — SOLUTION — build the counters yourself.
+// Module 23 / Exercise 2 - derive the counters yourself.
 //
-// BUILD: nvcc -arch=sm_89 -O3 -lineinfo -o e2s.exe exercise02_solution.cu
-// RUN  : e2s.exe
+// GOAL : `ncu` cannot run on this machine (ERR_NVGPUCTRPERM). So build the
+//        counters. You will write kernels that compute, about themselves, four
+//        of the quantities Nsight Compute would report:
+//
+//          sectors per request    l1tex__t_sectors_... / l1tex__t_requests_...
+//          bank conflict degree   l1tex__data_bank_conflicts_...
+//          achieved occupancy     sm__warps_active.avg.pct_of_peak_sustained_*
+//          lane efficiency        smsp__thread_inst_executed_per_inst_executed
+//
+//        and then write CLOSED-FORM predictions for the first two and check the
+//        measurement against the formula, row by row.
+//
+//        This is harder than reading the tool and it teaches the metrics far
+//        better. A counter you had to build is a counter you cannot misread.
+//
+// WHAT TO FILL IN
+//   TODO 1  distinctInWarp() and sectorsThisRequest()
+//   TODO 2  conflictDegree() -- the obvious version is wrong on two of the
+//           eight patterns, and the program prints both answers side by side
+//   TODO 3  reduceOccupancy() -- two reductions differing only by a denominator
+//   TODO 4  recordIssue() -- lane efficiency; the wrong reporter lane counts
+//           nothing at all and still prints a number
+//   TODO 5  predictSectorsStride(), predictDegreeStride(), predictDegreeDivide()
+//           -- all CLOSED FORM. No enumeration, no loop over 32 lanes.
+//
+// Every row is scored against your formula. OVERALL: PASS requires all of them.
+//
+// BUILD: nvcc -arch=sm_89 -O3 -lineinfo -o exercise02.exe exercise02.cu
+// RUN  : exercise02.exe
 // =============================================================================
 
 #include <cstdio>
@@ -33,15 +60,24 @@
 // =============================================================================
 __device__ __forceinline__ unsigned distinctInWarp(unsigned key)
 {
-    unsigned m    = __match_any_sync(FULL, key);
-    int      lane = (int)(threadIdx.x & 31u);
-    bool     lead = (__ffs((int)m) - 1) == lane;
-    return (unsigned)__popc(__ballot_sync(FULL, lead));
+    // TODO 1a: return the number of DISTINCT values of `key` across the 32 lanes
+    //          of this (fully active) warp. Every lane must return the same
+    //          answer. One warp intrinsic does the hard part in one instruction
+    //          -- find it rather than looping 32 times.
+    // YOUR CODE HERE
+    (void)key;
+    return 0u;
 }
 
 __device__ __forceinline__ unsigned sectorsThisRequest(const void *addr)
 {
-    return distinctInWarp((unsigned)(((unsigned long long)addr) >> 5));
+    // TODO 1b: the number of 32-byte sectors one warp instruction touches, given
+    //          each lane's byte address. This is exactly
+    //            l1tex__t_sectors_... / l1tex__t_requests_...
+    //          and exactly Module 5's hand procedure. One line, on top of 1a.
+    // YOUR CODE HERE
+    (void)addr;
+    return 0u;
 }
 
 // =============================================================================
@@ -49,19 +85,22 @@ __device__ __forceinline__ unsigned sectorsThisRequest(const void *addr)
 // =============================================================================
 __device__ __forceinline__ unsigned conflictDegree(unsigned wordIndex)
 {
-    unsigned m    = __match_any_sync(FULL, wordIndex);
-    int      lane = (int)(threadIdx.x & 31u);
-    bool     lead = (__ffs((int)m) - 1) == lane;
-    unsigned bank = wordIndex & (BANKS - 1);
-
-    unsigned deg = 0;
-    #pragma unroll
-    for (int b = 0; b < BANKS; ++b) {
-        unsigned bm = __ballot_sync(FULL, lead && bank == (unsigned)b);
-        unsigned c  = (unsigned)__popc(bm);
-        if (c > deg) deg = c;
-    }
-    return deg;
+    // TODO 2: the shared-memory conflict degree of this warp's access -- what
+    //         l1tex__data_pipe_lsu_wavefronts_mem_shared_op_ld.sum divided by
+    //         the request count reports.
+    //
+    //         bank = (byte address / 4) % 32, so bank = wordIndex % 32.
+    //
+    //         The degree is the maximum, over the 32 banks, of the number of
+    //         ??? that bank must supply. Getting the ??? right IS the exercise:
+    //         the obvious choice disagrees with the hardware on two of the
+    //         eight patterns tested, and the program prints both answers side
+    //         by side so you can see which two and why.
+    //
+    //         Every lane must return the same value.
+    // YOUR CODE HERE
+    (void)wordIndex;
+    return 0u;
 }
 
 // Same thing done the WRONG way: bucket lanes, not distinct words.
@@ -182,22 +221,33 @@ static void reduceOccupancy(const unsigned long long *res,
                             const unsigned long long *en,
                             double *occActive, double *occElapsed)
 {
-    unsigned long long maxSpan = 0;
-    for (int i = 0; i < NSM; ++i)
-        if (en[i] > st[i]) {
-            unsigned long long sp = en[i] - st[i];
-            if (sp > maxSpan) maxSpan = sp;
-        }
-    double sumA = 0.0, sumE = 0.0; int used = 0;
-    for (int i = 0; i < NSM; ++i) {
-        if (en[i] <= st[i]) continue;
-        double span = (double)(en[i] - st[i]);
-        sumA += (double)res[i] / (WARP_SLOTS_PER_SM * span);
-        sumE += (double)res[i] / (WARP_SLOTS_PER_SM * (double)maxSpan);
-        ++used;
-    }
-    *occActive  = used ? 100.0 * sumA / used : 0.0;
-    *occElapsed = 100.0 * sumE / NSM;
+    // TODO 3: two occupancy numbers out of the same three per-SM arrays.
+    //
+    //   res[i] = total warp-cycles of residency accumulated on SM i
+    //   st[i]  = earliest clock64() any warp on SM i observed  (~0ull if none)
+    //   en[i]  = latest   clock64() any warp on SM i observed  (0 if none)
+    //
+    //   occActive  -> sm__warps_active.avg.pct_of_peak_sustained_ACTIVE,
+    //                 i.e. ncu's "Achieved Occupancy". Each SM's warp-cycles
+    //                 over THAT SM's OWN busy span, averaged over the SMs that
+    //                 ran something.
+    //   occElapsed -> sm__warps_active.avg.pct_of_peak_sustained_ELAPSED.
+    //                 Each SM's warp-cycles over the WHOLE KERNEL's span,
+    //                 averaged over all NSM SMs, so an idle SM contributes a
+    //                 zero rather than being left out of the average.
+    //
+    //   Both are percentages; the per-SM denominator is
+    //   WARP_SLOTS_PER_SM * (the relevant span).
+    //
+    //   ONE TRAP, and it is why this is a TODO: the %clock64 counters are
+    //   PER-SM and are NOT mutually synchronised. Module 19 measured up to
+    //   298 million cycles of offset inside a single launch, so the kernel's
+    //   span may NOT be max(en) - min(st) taken across SMs. What is the only
+    //   defensible estimate of the kernel span from these arrays?
+    //
+    // YOUR CODE HERE
+    (void)res; (void)st; (void)en;
+    *occActive = 0.0; *occElapsed = 0.0;
 }
 
 // =============================================================================
@@ -209,12 +259,18 @@ static void reduceOccupancy(const unsigned long long *res,
 // =============================================================================
 __device__ __forceinline__ void recordIssue(unsigned long long *c)
 {
-    unsigned m    = __activemask();
-    int      lead = __ffs((int)m) - 1;
-    if ((int)(threadIdx.x & 31u) == lead) {
-        atomicAdd(&c[0], (unsigned long long)__popc(m));   // thread_inst_executed
-        atomicAdd(&c[1], 1ull);                            // inst_executed
-    }
+    // TODO 4: accumulate the two counters whose quotient is
+    //           smsp__thread_inst_executed_per_inst_executed.ratio
+    //         for the instruction stream at THIS point in the kernel:
+    //           c[0] += (threads executing here, this issue)
+    //           c[1] += 1                   (one warp instruction issued)
+    //
+    //         Exactly ONE lane per warp may do the accumulating, and choosing
+    //         the wrong one fails silently: pick a lane that is not active in
+    //         this region and both counters stay at zero while the program
+    //         still prints a ratio. Which lane is guaranteed to be active?
+    // YOUR CODE HERE
+    (void)c;
 }
 
 __global__ void kDiverge(const int * __restrict__ flag, float *out,
@@ -247,37 +303,41 @@ __global__ void kDiverge(const int * __restrict__ flag, float *out,
 // range crosses, plus one -- which is where the misalignment term lives.
 static int predictSectorsStride(int strideFloats, int baseFloats)
 {
-    const long long s = 4LL * strideFloats;
-    const long long b = 4LL * baseFloats;
-    if (s == 0) return 1;
-    if (s >= SECTOR_B) return 32;
-    const long long lo = b / SECTOR_B;
-    const long long hi = (b + 31 * s) / SECTOR_B;
-    return (int)(hi - lo + 1);
+    // TODO 5a: CLOSED FORM. Sectors touched by one warp executing
+    //            in[baseFloats + strideFloats*lane]
+    //          for a 4-byte element and a 32 B-aligned base pointer.
+    //          No loop over lanes. There are two regimes; find where they meet,
+    //          and note that `baseFloats` can push the covered byte range
+    //          across one extra sector boundary.
+    // YOUR CODE HERE
+    (void)strideFloats; (void)baseFloats;
+    return 0;
 }
 
-// Conflict degree of `s[strideWords * tid]` for a 4-byte access.
-//
-// Bank is (word mod 32). The lanes that land in one bank are those whose
-// (strideWords*lane) are congruent mod 32, i.e. lane spaced 32/gcd(strideWords,32)
-// apart -- there are gcd(strideWords,32) of them -- and their WORDS are all
-// different, so every one of them is a real conflict.
 static int predictDegreeStride(int strideWords)
 {
-    if (strideWords == 0) return 1;
-    int a = strideWords & 31, b = BANKS;
-    if (a == 0) return BANKS;
-    while (b) { int t = a % b; a = b; b = t; }
-    return a;
+    // TODO 5b: CLOSED FORM. Conflict degree of `s[strideWords * tid]` for a
+    //          4-byte access across 32 banks. No loop over lanes.
+    //          Which lanes land in the same bank, and are the WORDS they ask
+    //          that bank for the same or different? The answer is a standard
+    //          number-theoretic function of strideWords and 32.
+    // YOUR CODE HERE
+    (void)strideWords;
+    return 0;
 }
 
-// Conflict degree of `s[tid / k]` for 1 <= k <= 32.
-//
-// The warp reads only 32/k DISTINCT words, and they are consecutive, so they
-// occupy 32/k consecutive banks, one word each. Degree 1 -- a broadcast, not a
-// conflict. Counting LANES per bank gives k and is the classic misreading.
 static int predictDegreeDivide(int k)
-{ (void)k; return 1; }
+{
+    // TODO 5c: CLOSED FORM. Conflict degree of `s[tid / k]`, 1 <= k <= 32.
+    //          This is NOT of the form s[stride*tid], so 5b does not apply.
+    //          How many DISTINCT words does the warp ask for, and how are they
+    //          spread over the banks? The answer does not depend on k, and the
+    //          by-lane column of the printed table will tell you whether you
+    //          have it right.
+    // YOUR CODE HERE
+    (void)k;
+    return 0;
+}
 
 // =============================================================================
 // Harness
@@ -306,6 +366,13 @@ int main(void)
            "would report; here the kernel computes it about itself.\n\n");
 
     int score = 0, total = 0;
+
+    // Shipped with the TODOs unfilled every predictor returns 0. Say so and
+    // stop, rather than printing a table of zeros that looks like a result.
+    if (predictSectorsStride(1, 0) == 0 && predictDegreeStride(1) == 0) {
+        printf("Set TODO 5 first (and TODOs 1-4).\n");
+        return 0;
+    }
 
     // ------------------------------------------------------------ sectors
     unsigned *dOut; CHECK(cudaMalloc(&dOut, 32 * sizeof(unsigned)));

@@ -223,5 +223,67 @@ sorting, sparse formats, n-body, image convolution with large radius.
   clock via `clock64()` if you need compute-peak percentages.
 - `compute-sanitizer` does **not** detect local-memory spills (M4 verified this)
   — it is the right tool for races and illegal accesses, not for everything.
-- Pinned vs pageable H2D on this Windows/WDDM driver measures only 1.04–1.15×,
-  not the folklore 2×.
+- Pinned vs pageable H2D on this Windows/WDDM driver measures only 1.04–1.15×
+  raw, not the folklore 2× — **but the raw ratio is not why pinned memory
+  matters (M24).** `cudaMemcpyAsync` out of pageable memory **does not overlap
+  at all**: H2D pinned **1.666×** vs pageable **0.979×**; D2H pinned 1.631× vs
+  pageable 0.986×. `nsys` shows the host-side duration of the *same* copy at
+  **205.6 µs pageable vs 11.7 µs pinned** (17.6×) — all driver bounce-buffer
+  staging on the calling thread. Chunked pipelines partially recover
+  (1.15–1.17× vs pinned's 1.53×) because chunking supplies some of the slack
+  pinning would have.
+- **Kernel launch floor: 8–14 µs, and FLAT in grid size (M22).** Measured four
+  independent ways — 13.86 µs (async-curve floor), 13,509.6 ns (`cudaLaunchKernel`
+  avg over 81,080 calls), 8,171.5 ns (over 1,600 calls), 7.9–9.2 µs (null-kernel
+  probe, flat from 1 to 1024 blocks). **Confirms M11's ~10 µs inference, which
+  had been a single-session guess from a fusion ratio.** Minimum on-device kernel
+  cost ≈1.4 µs.
+- **Host-side API costs are unrelated to bytes (M22).** `cudaFree` **247 µs/call**
+  on a 4 MB buffer — 25× a kernel launch; `cudaMalloc` 142 µs. A 4 MB **D2D**
+  copy is 6.6 µs and effectively free, while a **4-byte blocking D2H** costs the
+  host >100 ms. Pageable `cudaMemcpy` ~11.7 GB/s.
+- **Event-pair timing is an UPPER BOUND, not a measurement (M22).** Demonstrated:
+  two kernels identical to **0.7%** by `nsys`, while the in-program event harness
+  claimed one was 5–25% slower. Measured inflation 13–16 percentage points, and
+  it fails completely below the launch floor. A per-launch `cudaEvent` harness
+  also cost ~40 µs/iteration — **the instrument became the bottleneck.**
+- **Serialization costs in series mask each other (M22).** A hidden
+  `cudaDeviceSynchronize` was **0.1% of `cuda_api_sum`** — because a blocking
+  copy ahead of it had already drained the queue — yet worth **1.19×** once the
+  other two causes were fixed. Measured with a partial-fix build: 61.7 → 51.7
+  µs/iter.
+- **M8's open problem is RESOLVED (M23).** M8 found `__activemask()` cannot
+  separate predication from branching. The metric *pair*
+  `smsp__thread_inst_executed_per_inst_executed.ratio` and
+  `..._pred_on_...` can: **the gap between them is exactly the predication.**
+- **An optimization's value must be re-derived every time the binding
+  constraint moves (M23).** The *same* AoS→SoA change measured **1.02× at 2560
+  threads with 1 load in flight and 2.28× at 163,840 threads with 4 loads in
+  flight.** It also *lowers* achieved DRAM throughput both times (130.7 → 53.2
+  GB/s). A layout fix is worth nothing on a latency-bound kernel until the
+  latency is fixed.
+- **Sector amplification can be load-bearing concurrency (M23).** A warp's
+  single `LDG` over a 16 B stride covers 16 sectors = **512 B in flight**; the
+  "fixed" SoA version covers 4 = 128 B. **Fixing the layout of a latency-bound
+  kernel reduces its MLP** — the same mechanism M21 used to reconcile the
+  pointer chase's 280–288-cycle effective latency against M4's 575.
+- **⚠️ `sm__warps_active.avg.pct_of_peak_sustained_elapsed` is in NO `ncu`
+  section (M23, verified against `Occupancy.section`).** Only the `_active`
+  form is displayed — so **M19's structural-blindness result applies to the
+  default report**, not just to a metric nobody looks at.
+- **`asyncEngineCount` = 1 (M24).** One DMA engine serving both directions, so
+  **three-way H2D/compute/D2H overlap is not achievable on this part.** The
+  bound is `(H+K+D)/max(H+D, K)`, not `(H+K+D)/max(H,K,D)`: measured bound
+  1.65–1.70× for a 48 MB pipeline (2.53× with two engines), achieved 1.52–1.68×
+  = 89–94% of bound. Consequence: the obvious issue order
+  `H2D(k), K(k), D2H(k)` head-of-line-blocks the engine and measures
+  **0.87× — slower than not using streams at all.** `concurrentKernels` = 1;
+  stream priority range [0,−5], 6 levels.
+- **Where streams do NOT help, measured (M24).** The same 9-node DAG, identical
+  code and events: at **0.4 blocks/SM → 1.76–1.79× = 100–102% of its
+  critical-path bound**; at **16 blocks/SM → 1.008–1.050× = 49–59% of the same
+  bound.** Two-kernel sweep `both/one` = 1.001/1.003/1.005/1.016 at 1/10/20/40
+  blocks, 1.251 at 80, 1.697 at 240. On 40 SMs any kernel written the way this
+  course teaches already owns the device. **Copy/compute overlap is the one
+  form of concurrency to recommend unreservedly — the copy engine is separate
+  hardware.**

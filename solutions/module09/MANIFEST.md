@@ -147,7 +147,7 @@ co-residency wall).
   the `volatile` warp-synchronous tail is shown here only as a bug
 - **Module 17 (tiled GEMM / software pipelining)**: double-buffering to remove
   the WAR barrier is introduced here as the germ of the pipelining there
-- **Module 26 (streams)**: kernel-boundary ordering is used here; asynchrony
+- **Module 24 (streams)** [renumbered; this manifest predates the current roadmap]: kernel-boundary ordering is used here; asynchrony
   and overlap are not
 - **Module 29 (cooperative groups in depth)**: `grid.sync()`,
   `cudaLaunchCooperativeKernel`, the co-residency cap on cooperative grids,
